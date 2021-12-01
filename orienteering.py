@@ -8,21 +8,27 @@ from qiskit_optimization.translators import from_docplex_mp
 from qiskit_optimization.converters import QuadraticProgramToQubo
 from qiskit.algorithms import NumPyMinimumEigensolver
 from typing import Dict, List
+from random import randrange
 
 
 ### some options
-showGraph = False
+showGraph = True
 solveClassically = True
-solveQuantumlike = True
+solveQuantumlike = False
+printConstraints = False
 
 
 def drawGraph(G):
+    reducedEdges = list(filter(lambda x: x[2]['weight'] < G.graph['maxCost'], G.edges(data=True)))
+    reducedGraph = nx.DiGraph()
+    reducedGraph.add_edges_from(reducedEdges)
+    reducedGraph.add_nodes_from(G.nodes)
     labels = {n: str(n) + ': ' + str(G.nodes[n]['weight']) for n in G.nodes}
     colors = [G.nodes[n]['weight'] for n in G.nodes]
-    pos = nx.spring_layout(G)
-    nx.draw(G, with_labels=True, labels=labels, node_color=colors, node_size=1000)
-    edge_labels = nx.get_edge_attributes(G, 'weight')
-    nx.draw_networkx_edge_labels(G, pos=pos, edge_labels=edge_labels)
+    pos = nx.spring_layout(reducedGraph)
+    nx.draw(reducedGraph, with_labels=True, labels=labels, node_color=colors, node_size=1000)
+    edge_labels = nx.get_edge_attributes(reducedGraph, 'weight')
+    nx.draw_networkx_edge_labels(reducedGraph, pos=pos, edge_labels=edge_labels)
     plt.show()
 
 def to_integer_program(G, solveClassically):
@@ -68,23 +74,40 @@ def to_integer_program(G, solveClassically):
                 G.edges[i, j]["weight"] * x[(i, j)]
                 for i in range(n)
                 for j in range(n)
-            ) <= T_max)
+            ) <= G.graph['maxCost'])
 
-    mdl.prettyprint()
+    if printConstraints:
+        mdl.prettyprint()
     if solveClassically:
         print("Classical solution:")
         mdl.solve()
-        print("Best route cost: " + str(mdl.blended_objective_values[0]))
-        solution = []
-        for i in range(n):
-            for j in range(n):
-                var = mdl.get_var_by_name(x[i, j].lp_name).raw_solution_value
-                if var > 0:
-                    solution.append(str(x[i, j]))
+        if mdl.get_solve_status().value == 3:
+            print("No solution found.")
+        else:
+            print("Best route cost: " + str(mdl.blended_objective_values[0]))
+            solution = []
+            for i in range(n):
+                for j in range(n):
+                    var = mdl.get_var_by_name(x[i, j].lp_name).raw_solution_value
+                    if var > 0:
+                        solution.append(str(x[i, j]))
 
-    print("Best route: " + str(solution))
+            print("Best route: " + str(beautifySolution(solution)))
     op = from_docplex_mp(mdl)
     return op
+
+def beautifySolution(varList):
+    tups = [x.split('_')[1:] for x in varList]
+    res = []
+    res.append(tups[0][0])
+    current = tups[0][1]
+    while current != '0':
+        el = list(filter(lambda x: x[0] == current, tups))[0]
+        res.append(el[0])
+        current = el[1]
+    return res
+
+        
 
 def interpret(res, qp):
     bits = []
@@ -95,12 +118,12 @@ def interpret(res, qp):
     vars = [qp.variables[i].name for i in range(len(qp.variables)) if i in bits]
     vars = list(filter(lambda x: x[0] != 'u', vars))
     vars.sort()
-    return vars
+    return beautifySolution(vars)
 
 
 def getExampleGraph1():
     # create a simple orienteering graph (directed)
-    G = nx.DiGraph()
+    G = nx.DiGraph(maxCost=20)
     G.add_node(0, weight=2)
     G.add_node(1, weight=8)
     G.add_node(2, weight=6)
@@ -113,7 +136,7 @@ def getExampleGraph1():
 
 def getExampleGraph():
     # create a simple orienteering graph (directed)
-    G = nx.DiGraph()
+    G = nx.DiGraph(maxCost=20)
     G.add_node(0, weight=2)
     G.add_node(1, weight=8)
     G.add_node(2, weight=6)
@@ -128,7 +151,7 @@ def getExampleGraph():
     return G
 
 def getSmallExmapleGraph1():
-    G = nx.DiGraph()
+    G = nx.DiGraph(maxCost=20)
     G.add_node(0, weight=2)
     G.add_node(1, weight=8)
     G.add_node(2, weight=6)
@@ -139,7 +162,7 @@ def getSmallExmapleGraph1():
     return G
 
 def getSmallExmapleGraph():
-    G = nx.DiGraph()
+    G = nx.DiGraph(maxCost=20)
     G.add_node(0, weight=2)
     G.add_node(1, weight=8)
     G.add_node(2, weight=6)
@@ -172,10 +195,21 @@ def solveWithQC(qp):
 def makeFullyConnectedGraph(G):
     for (i, j) in [(i, j) for i in range(len(G.nodes)) for j in range(len(G.nodes))]:
         if (i, j) not in G.edges:
-            G.add_edge(i, j, weight=T_max * 2)
+            G.add_edge(i, j, weight=G.graph['maxCost'] * 2)
 
-T_max = 30
-G = getSmallExmapleGraph()
+
+def getRandomGraph(numNodes=10, numEdges=20):
+    G = nx.DiGraph(maxCost=100)
+    for i in range(numNodes):
+        G.add_node(i, weight=randrange(10))
+
+    for i in range(numEdges):
+        G.add_edge(randrange(numNodes), randrange(numNodes), weight=randrange(10))
+
+    return G
+
+#G = getSmallExmapleGraph()
+G = getRandomGraph(10, 20)
 makeFullyConnectedGraph(G)
 
 if showGraph:
