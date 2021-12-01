@@ -14,7 +14,7 @@ from random import randrange
 ### some options
 showGraph = True
 solveClassically = True
-solveQuantumlike = False
+solveQuantumlike = True
 printConstraints = False
 
 
@@ -36,8 +36,7 @@ def to_integer_program(G, solveClassically):
     n = G.number_of_nodes()
     x = {
         (i, j): mdl.binary_var(name="x_{0}_{1}".format(i, j))
-        for i in range(n)
-        for j in range(n)
+        for (i, j) in G.edges
     }
 
     u = {
@@ -47,33 +46,34 @@ def to_integer_program(G, solveClassically):
 
     orienteering_func = mdl.sum(
         G.nodes[j]["weight"] * x[(i, j)]
-        for i in range(n)
-        for j in range(n)
+        for (i, j) in G.edges
     )
     mdl.maximize(orienteering_func)
 
     for i in range(1, n):
         for j in range(1, n):
-            mdl.add_constraint(u[i] - u[j] + 1 <= (n - 1)*(1 - x[(i, j)]))
+            if (i, j) in G.edges:
+                mdl.add_constraint(u[i] - u[j] + 1 <= (n - 1)*(1 - x[(i, j)]))
+            else:
+                mdl.add_constraint(u[i] - u[j] + 1 <= (n - 1))
 
     for k in range(1, n):
         # a node has to have same number of in and out going edges
         # => there are no dead ends
-        mdl.add_constraint(mdl.sum(x[i, k] for i in range(n)) == mdl.sum(x[k, j] for j in range(n)))
+        mdl.add_constraint(mdl.sum(x[i, k] for i in range(n) if (i, k) in G.edges) == mdl.sum(x[k, j] for j in range(n) if (k, j) in G.edges))
         # a node may appear only once 
-        mdl.add_constraint(mdl.sum(x[k, j] for j in range(n)) <= 1)
+        mdl.add_constraint(mdl.sum(x[k, j] for j in range(n) if (k, j) in G.edges) <= 1)
 
     
     # we start and end at node 0
     # at least together with the above constraints this is what this is for
-    mdl.add_constraint(mdl.sum(x[0, j] for j in range(1, n)) == 1)
-    mdl.add_constraint(mdl.sum(x[j, 0] for j in range(1, n)) == 1)
+    mdl.add_constraint(mdl.sum(x[0, j] for j in range(1, n) if (0, j) in G.edges) == 1)
+    mdl.add_constraint(mdl.sum(x[j, 0] for j in range(1, n) if (j, 0) in G.edges) == 1)
 
     # do not exceed threshold
     mdl.add_constraint(mdl.sum(
                 G.edges[i, j]["weight"] * x[(i, j)]
-                for i in range(n)
-                for j in range(n)
+                for (i, j) in G.edges
             ) <= G.graph['maxCost'])
 
     if printConstraints:
@@ -208,8 +208,8 @@ def getRandomGraph(numNodes=10, numEdges=20):
 
     return G
 
-#G = getSmallExmapleGraph()
-G = getRandomGraph(10, 20)
+G = getSmallExmapleGraph()
+#G = getRandomGraph(10, 20)
 makeFullyConnectedGraph(G)
 
 if showGraph:
