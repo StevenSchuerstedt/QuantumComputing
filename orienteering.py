@@ -4,17 +4,23 @@ from docplex.mp.model import Model
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('tkagg')
+from qiskit import Aer
 from qiskit_optimization.translators import from_docplex_mp
+from qiskit.algorithms.optimizers import COBYLA
 from qiskit_optimization.converters import QuadraticProgramToQubo
-from qiskit.algorithms import NumPyMinimumEigensolver
+from qiskit.algorithms import NumPyMinimumEigensolver, VQE, QAOA
 from typing import Dict, List
 from random import randrange
-
+from qiskit.utils import algorithm_globals, QuantumInstance
+from qiskit.algorithms.optimizers import SPSA
+from qiskit.circuit.library import TwoLocal
 
 ### some options
 showGraph = True
 solveClassically = True
-solveQuantumlike = True
+solveQuantumlike = False
+solveWithVQEb = False
+solveWithQAOAb = True
 printConstraints = False
 
 
@@ -150,16 +156,6 @@ def getExampleGraph():
     G.add_edge(0, 2, weight=10)
     return G
 
-def getSmallExmapleGraph1():
-    G = nx.DiGraph(maxCost=20)
-    G.add_node(0, weight=2)
-    G.add_node(1, weight=8)
-    G.add_node(2, weight=6)
-    G.add_edge(0, 1, weight=10 )
-    G.add_edge(1, 0, weight=10 )
-    G.add_edge(1, 2, weight=25)
-    G.add_edge(2, 0, weight=5)
-    return G
 
 def getSmallExmapleGraph():
     G = nx.DiGraph(maxCost=20)
@@ -192,6 +188,61 @@ def solveWithQC(qp):
     interpretation = interpret(x, qp)
     print('Best route:', interpretation)
 
+def solveWithVQE(qp):
+    # convert integer program to qubo
+    qp2qubo = QuadraticProgramToQubo()
+    qubo = qp2qubo.convert(qp)
+
+    # convert to ising hamiltonian
+    qubitOp, offset = qubo.to_ising()
+
+    algorithm_globals.random_seed = 123
+    seed = 10598
+    # only statevector simulator works for small instances?
+    # use qasm_simulator as backend for larger instances
+    backend = Aer.get_backend('aer_simulator_statevector')
+    quantum_instance = QuantumInstance(backend, seed_simulator=seed, seed_transpiler=seed)
+
+    spsa = SPSA(maxiter=300)
+    ry = TwoLocal(qubitOp.num_qubits, 'ry', 'cz', reps=5, entanglement='linear')
+    print("Solve with VQE...")
+    print("number of qubits: ", qubitOp.num_qubits)
+    vqe = VQE(ry, optimizer=spsa, quantum_instance=quantum_instance)
+
+    result = vqe.compute_minimum_eigenvalue(qubitOp)
+
+    print("VQE solution:")
+    print('Best route cost:', (result.eigenvalue.real + offset) * -1)
+    x = np.argmax(result.eigenstate.primitive)
+    interpretation = interpret(x, qp)
+    print('Best route:', interpretation)
+    print('time:', result.optimizer_time)
+
+
+def solveWithQAOA(qp):
+    # convert integer program to qubo
+    qp2qubo = QuadraticProgramToQubo()
+    qubo = qp2qubo.convert(qp)
+
+    # convert to ising hamiltonian
+    qubitOp, offset = qubo.to_ising()
+
+    algorithm_globals.random_seed = 10598
+    print("Solve with QAOA...")
+    print("number of qubits: ", qubitOp.num_qubits)
+    optimizer = COBYLA()
+    qaoa = QAOA(qubitOp, optimizer, quantum_instance=Aer.get_backend('statevector_simulator'))
+
+    result = qaoa.compute_minimum_eigenvalue()
+
+    print("QAOA solution:")
+    print('Best route cost:', (result.eigenvalue.real + offset) * -1)
+    x = np.argmax(result.eigenstate.primitive)
+    interpretation = interpret(x, qp)
+    print('Best route:', interpretation)
+    print('time:', result.optimizer_time)
+
+
 def makeFullyConnectedGraph(G):
     for (i, j) in [(i, j) for i in range(len(G.nodes)) for j in range(len(G.nodes))]:
         if (i, j) not in G.edges:
@@ -209,6 +260,7 @@ def getRandomGraph(numNodes=10, numEdges=20):
     return G
 
 G = getSmallExmapleGraph()
+#G = getExampleGraph()
 #G = getRandomGraph(10, 20)
 makeFullyConnectedGraph(G)
 
@@ -220,5 +272,11 @@ qp = to_integer_program(G, solveClassically)
 
 if solveQuantumlike:
     solveWithQC(qp)
+
+if solveWithVQEb:
+    solveWithVQE(qp)
+
+if solveWithQAOAb:
+    solveWithQAOA(qp)
 
 
