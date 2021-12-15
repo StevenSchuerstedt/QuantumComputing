@@ -14,13 +14,29 @@ from random import randrange
 from qiskit.utils import algorithm_globals, QuantumInstance
 from qiskit.algorithms.optimizers import SPSA
 from qiskit.circuit.library import TwoLocal
+from qiskit import IBMQ
+from qiskit.providers.ibmq import least_busy
+
+# IBMQ.save_account('your api key')
+# before using load_account() you need to call save account one time
+
+IBMQ.load_account()
+
+#ibm-q is the public provider
+provider = IBMQ.get_provider(hub = 'ibm-q')
+
+# filter for specific backends which are no simulator
+small_devices = provider.backends(filters=lambda x: not x.configuration().simulator)
+
+# helper function to get the least busy device
+least_busy(small_devices)
 
 ### some options
 showGraph = True
 solveClassically = True
 solveQuantumlike = False
-solveWithVQEb = False
-solveWithQAOAb = True
+solveWithVQEb = True
+solveWithQAOAb = False
 printConstraints = False
 
 
@@ -200,7 +216,11 @@ def solveWithVQE(qp):
     seed = 10598
     # only statevector simulator works for small instances?
     # use qasm_simulator as backend for larger instances
-    backend = Aer.get_backend('aer_simulator_statevector')
+    #backend = Aer.get_backend('aer_simulator_statevector')
+
+    # get real quantum backend
+    backend = least_busy(small_devices)
+
     quantum_instance = QuantumInstance(backend, seed_simulator=seed, seed_transpiler=seed)
 
     spsa = SPSA(maxiter=300)
